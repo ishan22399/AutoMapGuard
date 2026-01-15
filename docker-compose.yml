@@ -1,0 +1,125 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with PostGIS for spatial data
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: automapguard-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: automapguard
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - automapguard-network
+
+  # Python Geospatial Microservice
+  python-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: automapguard-python-service
+    ports:
+      - "8081:8081"
+    environment:
+      PYTHON_SERVICE_HOST: 0.0.0.0
+      PYTHON_SERVICE_PORT: 8081
+      ENVIRONMENT: development
+      LOG_LEVEL: INFO
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - automapguard-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Java Spring Boot Backend
+  java-backend:
+    build:
+      context: ./backend-java
+      dockerfile: Dockerfile
+    container_name: automapguard-java-backend
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/automapguard
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_PROFILES_ACTIVE: docker
+      JWT_SECRET: super-secret-key-change-this-in-production-at-least-32-chars-long
+      PYTHON_MICROSERVICE_URL: http://python-service:8081
+    depends_on:
+      postgres:
+        condition: service_healthy
+      python-service:
+        condition: service_healthy
+    networks:
+      - automapguard-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PgAdmin for database management (Optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: automapguard-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - automapguard-network
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: automapguard-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: http://localhost:8080/api
+    depends_on:
+      - java-backend
+    networks:
+      - automapguard-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  automapguard-network:
+    driver: bridge
+
+# Quick start guide:
+# 1. docker-compose up -d               # Start all services
+# 2. docker-compose logs -f             # Follow all logs
+# 3. docker-compose ps                  # Check service status
+# 4. docker-compose down                # Stop all services
+# 5. docker-compose down -v             # Stop and remove volumes
