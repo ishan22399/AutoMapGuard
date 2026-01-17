@@ -147,4 +147,4 @@ cd frontend && npm test
 
 ## License
 
-MIT [License](License) 
+MIT [LICENSE](LICENSE) 
